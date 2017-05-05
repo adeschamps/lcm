@@ -11,4 +11,5 @@ categories = ["api-bindings", "external-ffi-bindings", "encoding"]
 
 [dependencies]
 byteorder = "0.5"
+error-chain = "0.10"
 log = { version = "0.3", optional = true }

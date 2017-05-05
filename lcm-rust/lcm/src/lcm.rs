@@ -1,4 +1,4 @@
-use std::io::{Error, ErrorKind, Result};
+use error::{ErrorKind, Result};
 use std::ffi::CString;
 use message::Message;
 use std::cmp::Ordering;
@@ -35,7 +35,7 @@ impl Lcm {
         trace!("Creating LCM instance");
         let lcm = unsafe { lcm_create(ptr::null()) };
         match lcm.is_null() {
-            true => Err(Error::new(ErrorKind::Other, "Failed to initialize LCM.")),
+            true => Err(ErrorKind::FailedToInitialize.into()),
             false => {
                 Ok(Lcm {
                     lcm: lcm,
@@ -117,7 +117,7 @@ impl Lcm {
 
         match result {
             0 => Ok(()),
-            _ => Err(Error::new(ErrorKind::Other, "LCM: Failed to unsubscribe")),
+            _ => Err(ErrorKind::FailedToUnsubscribe.into())
         }
     }
 
@@ -141,7 +141,7 @@ impl Lcm {
         };
         match result {
             0 => Ok(()),
-            _ => Err(Error::new(ErrorKind::Other, "LCM Error")),
+            _ => Err(ErrorKind::FailedToPublish.into())
         }
     }
 
@@ -161,7 +161,7 @@ impl Lcm {
         let result = unsafe { lcm_handle(self.lcm) };
         match result {
             0 => Ok(()),
-            _ => Err(Error::new(ErrorKind::Other, "LCM Error")),
+            _ => Err(ErrorKind::InternalError.into())
         }
     }
 
@@ -182,8 +182,8 @@ impl Lcm {
     pub fn handle_timeout(&mut self, timeout: Duration) -> Result<()> {
         let result = unsafe { lcm_handle_timeout(self.lcm, (timeout.as_secs() * 1000) as i32 + (timeout.subsec_nanos() / 1000_000) as i32) };
         match result.cmp(&0) {
-            Ordering::Less => Err(Error::new(ErrorKind::Other, "LCM Error")),
-            Ordering::Equal => Err(Error::new(ErrorKind::Other, "LCM Timeout")),
+            Ordering::Less => Err(ErrorKind::InternalError.into()),
+            Ordering::Equal => Err(ErrorKind::Timeout.into()),
             Ordering::Greater => Ok(()),
         }
     }

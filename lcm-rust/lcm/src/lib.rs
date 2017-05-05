@@ -11,6 +11,9 @@
 
 extern crate byteorder;
 
+#[macro_use]
+extern crate error_chain;
+
 #[cfg(feature = "log")]
 #[macro_use]
 extern crate log;
@@ -19,6 +22,8 @@ extern crate log;
 macro_rules! trace { ($($a:tt)*) => ( () ) }
 #[cfg(not(feature = "log"))]
 macro_rules! error { ($($a:tt)*) => ( () ) }
+
+mod error;
 
 mod ffi;
 
