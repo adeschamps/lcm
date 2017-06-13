@@ -12,26 +12,26 @@ use ffi::*;
 
 /// An LCM instance that handles publishing and subscribing,
 /// as well as encoding and decoding messages.
-pub struct Lcm {
+pub struct Lcm<'a> {
     lcm: *mut lcm_t,
-    subscriptions: Vec<Rc<LcmSubscription>>,
+    subscriptions: Vec<Rc<LcmSubscription<'a>>>,
 }
 
 
-pub struct LcmSubscription {
+pub struct LcmSubscription<'a> {
     subscription: *mut lcm_subscription_t,
-    handler: Box<FnMut(*const lcm_recv_buf_t)>,
+    handler: Box<FnMut(*const lcm_recv_buf_t) + 'a>,
 }
 
 
-impl Lcm {
+impl<'a> Lcm<'a> {
     /// Creates a new `Lcm` instance.
     ///
     /// ```
     /// use lcm::Lcm;
     /// let mut lcm = Lcm::new().unwrap();
     /// ```
-    pub fn new() -> Result<Lcm> {
+    pub fn new() -> Result<Lcm<'a>> {
         trace!("Creating LCM instance");
         let lcm = unsafe { lcm_create(ptr::null()) };
         match lcm.is_null() {
@@ -56,9 +56,9 @@ impl Lcm {
     /// let mut lcm = Lcm::new().unwrap();
     /// lcm.subscribe("GREETINGS", |name: String| println!("Hello, {}!", name) );
     /// ```
-    pub fn subscribe<M, F>(&mut self, channel: &str, mut callback: F) -> Rc<LcmSubscription>
+    pub fn subscribe<M, F>(&mut self, channel: &str, mut callback: F) -> Rc<LcmSubscription<'a>>
         where M: Message,
-              F: FnMut(M) + 'static
+              F: FnMut(M) + 'a
     {
         trace!("Subscribing handler to channel {}", channel);
 
@@ -218,7 +218,7 @@ impl Lcm {
     }
 }
 
-impl Drop for Lcm {
+impl<'a> Drop for Lcm<'a> {
     fn drop(&mut self) {
         trace!("Destroying Lcm instance");
         unsafe { lcm_destroy(self.lcm) };
@@ -252,5 +252,16 @@ mod test {
         let sub = lcm.subscribe("channel", |_: String| {});
         lcm.unsubscribe(sub).unwrap();
         assert_eq!(lcm.subscriptions.len(), 0);
+    }
+
+    fn is_send<T: Send>() -> bool { true }
+
+    fn is_sync<T: Sync>() -> bool { true }
+
+    #[test]
+    fn test_send_sync()
+    {
+        //assert!(is_send::<Lcm>(), "LCM is not send");
+        //assert!(is_sync::<Lcm>(), "LCM is not sync");
     }
 }
