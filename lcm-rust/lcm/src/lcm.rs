@@ -4,7 +4,7 @@ use message::Message;
 use std::cmp::Ordering;
 use std::ptr;
 use std::boxed::Box;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::ops::Deref;
 use std::slice;
 use std::time::Duration;
@@ -14,8 +14,10 @@ use ffi::*;
 /// as well as encoding and decoding messages.
 pub struct Lcm<'a> {
     lcm: *mut lcm_t,
-    subscriptions: Vec<Rc<LcmSubscription<'a>>>,
+    subscriptions: Mutex<Vec<Arc<LcmSubscription<'a>>>>,
 }
+unsafe impl<'a> Sync for Lcm<'a> {}
+unsafe impl<'a> Send for Lcm<'a> {}
 
 
 pub struct LcmSubscription<'a> {
@@ -39,7 +41,7 @@ impl<'a> Lcm<'a> {
             false => {
                 Ok(Lcm {
                     lcm: lcm,
-                    subscriptions: Vec::new(),
+                    subscriptions: Mutex::new(Vec::new()),
                 })
             }
         }
@@ -56,7 +58,7 @@ impl<'a> Lcm<'a> {
     /// let mut lcm = Lcm::new().unwrap();
     /// lcm.subscribe("GREETINGS", |name: String| println!("Hello, {}!", name) );
     /// ```
-    pub fn subscribe<M, F>(&mut self, channel: &str, mut callback: F) -> Rc<LcmSubscription<'a>>
+    pub fn subscribe<M, F>(&mut self, channel: &str, mut callback: F) -> Arc<LcmSubscription<'a>>
         where M: Message,
               F: FnMut(M) + 'a
     {
@@ -79,7 +81,7 @@ impl<'a> Lcm<'a> {
             }
         });
 
-        let mut subscription = Rc::new(LcmSubscription {
+        let mut subscription = Arc::new(LcmSubscription {
             subscription: ptr::null_mut(),
             handler: handler,
         });
@@ -93,8 +95,8 @@ impl<'a> Lcm<'a> {
                           user_data)
         };
 
-        Rc::get_mut(&mut subscription).unwrap().subscription = c_subscription;
-        self.subscriptions.push(subscription.clone());
+        Arc::get_mut(&mut subscription).unwrap().subscription = c_subscription;
+        self.subscriptions.lock().expect("Poisoned mutex").push(subscription.clone());
 
         subscription
     }
@@ -109,11 +111,12 @@ impl<'a> Lcm<'a> {
     /// // ...
     /// lcm.unsubscribe(handler);
     /// ```
-    pub fn unsubscribe(&mut self, handler: Rc<LcmSubscription>) -> Result<()> {
+    pub fn unsubscribe(&mut self, handler: Arc<LcmSubscription>) -> Result<()> {
         trace!("Unsubscribing handler {:?}", handler.subscription);
         let result = unsafe { lcm_unsubscribe(self.lcm, handler.subscription) };
 
-        self.subscriptions.retain(|sub| { sub.subscription != handler.subscription });
+        self.subscriptions.lock().expect("Poisoned mutex")
+                          .retain(|sub| { sub.subscription != handler.subscription });
 
         match result {
             0 => Ok(()),
@@ -198,7 +201,7 @@ impl<'a> Lcm<'a> {
     /// let handler = lcm.subscribe("POSITION", handler_function);
     /// lcm.subscription_set_queue_capacity(handler, 30);
     /// ```
-    pub fn subscription_set_queue_capacity(&self, handler: Rc<LcmSubscription>, num_messages: usize) {
+    pub fn subscription_set_queue_capacity(&self, handler: Arc<LcmSubscription>, num_messages: usize) {
         let handler = handler.subscription;
         let num_messages = num_messages as _;
         unsafe { lcm_subscription_set_queue_capacity(handler, num_messages) };
@@ -243,7 +246,8 @@ mod test {
     fn test_subscribe() {
         let mut lcm = Lcm::new().unwrap();
         lcm.subscribe("channel", |_: String| {});
-        assert_eq!(lcm.subscriptions.len(), 1);
+        let subs = lcm.subscriptions.lock().unwrap();
+        assert_eq!(subs.len(), 1);
     }
 
     #[test]
@@ -251,17 +255,8 @@ mod test {
         let mut lcm = Lcm::new().unwrap();
         let sub = lcm.subscribe("channel", |_: String| {});
         lcm.unsubscribe(sub).unwrap();
-        assert_eq!(lcm.subscriptions.len(), 0);
-    }
 
-    fn is_send<T: Send>() -> bool { true }
-
-    fn is_sync<T: Sync>() -> bool { true }
-
-    #[test]
-    fn test_send_sync()
-    {
-        //assert!(is_send::<Lcm>(), "LCM is not send");
-        //assert!(is_sync::<Lcm>(), "LCM is not sync");
+        let subs = lcm.subscriptions.lock().unwrap();
+        assert_eq!(subs.len(), 0);
     }
 }
