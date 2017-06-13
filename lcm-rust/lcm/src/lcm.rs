@@ -31,7 +31,7 @@ impl<'a> Lcm<'a> {
     ///
     /// ```
     /// use lcm::Lcm;
-    /// let mut lcm = Lcm::new().unwrap();
+    /// let lcm = Lcm::new().unwrap();
     /// ```
     pub fn new() -> Result<Lcm<'a>> {
         trace!("Creating LCM instance");
@@ -55,12 +55,12 @@ impl<'a> Lcm<'a> {
     ///
     /// ```
     /// # use lcm::Lcm;
-    /// let mut lcm = Lcm::new().unwrap();
+    /// let lcm = Lcm::new().unwrap();
     /// lcm.subscribe("GREETINGS", |name: String| println!("Hello, {}!", name) );
     /// ```
-    pub fn subscribe<M, F>(&mut self, channel: &str, mut callback: F) -> Arc<LcmSubscription<'a>>
+    pub fn subscribe<M, F>(&self, channel: &str, mut callback: F) -> Arc<LcmSubscription<'a>>
         where M: Message,
-              F: FnMut(M) + 'a
+              F: FnMut(M) + Send + 'a
     {
         trace!("Subscribing handler to channel {}", channel);
 
@@ -96,7 +96,8 @@ impl<'a> Lcm<'a> {
         };
 
         Arc::get_mut(&mut subscription).unwrap().subscription = c_subscription;
-        self.subscriptions.lock().expect("Poisoned mutex").push(subscription.clone());
+        let sub_clone = subscription.clone();
+        self.subscriptions.lock().expect("Poisoned mutex").push(sub_clone);
 
         subscription
     }
@@ -106,12 +107,12 @@ impl<'a> Lcm<'a> {
     /// ```
     /// # use lcm::Lcm;
     /// # let handler_function = |name: String| println!("Hello, {}!", name);
-    /// # let mut lcm = Lcm::new().unwrap();
+    /// # let lcm = Lcm::new().unwrap();
     /// let handler = lcm.subscribe("GREETINGS", handler_function);
     /// // ...
     /// lcm.unsubscribe(handler);
     /// ```
-    pub fn unsubscribe(&mut self, handler: Arc<LcmSubscription>) -> Result<()> {
+    pub fn unsubscribe(&self, handler: Arc<LcmSubscription>) -> Result<()> {
         trace!("Unsubscribing handler {:?}", handler.subscription);
         let result = unsafe { lcm_unsubscribe(self.lcm, handler.subscription) };
 
@@ -128,10 +129,10 @@ impl<'a> Lcm<'a> {
     ///
     /// ```
     /// # use lcm::Lcm;
-    /// let mut lcm = Lcm::new().unwrap();
+    /// let lcm = Lcm::new().unwrap();
     /// lcm.publish("GREETINGS", &"Charles".to_string()).unwrap();
     /// ```
-    pub fn publish<M>(&mut self, channel: &str, message: &M) -> Result<()>
+    pub fn publish<M>(&self, channel: &str, message: &M) -> Result<()>
         where M: Message
     {
         let channel = CString::new(channel).unwrap();
@@ -153,14 +154,14 @@ impl<'a> Lcm<'a> {
     /// ```
     /// # use lcm::Lcm;
     /// # let handler_function = |name: String| println!("Hello, {}!", name);
-    /// let mut lcm = Lcm::new().unwrap();
+    /// let lcm = Lcm::new().unwrap();
     /// lcm.subscribe("POSITION", handler_function);
     /// loop {
     /// # break;
     ///     lcm.handle().unwrap();
     /// }
     /// ```
-    pub fn handle(&mut self) -> Result<()> {
+    pub fn handle(&self) -> Result<()> {
         let result = unsafe { lcm_handle(self.lcm) };
         match result {
             0 => Ok(()),
@@ -174,7 +175,7 @@ impl<'a> Lcm<'a> {
     /// # use std::time::Duration;
     /// # use lcm::Lcm;
     /// # let handler_function = |name: String| println!("Hello, {}!", name);
-    /// let mut lcm = Lcm::new().unwrap();
+    /// let lcm = Lcm::new().unwrap();
     /// lcm.subscribe("POSITION", handler_function);
     /// let wait_dur = Duration::from_millis(100);
     /// loop {
@@ -182,7 +183,7 @@ impl<'a> Lcm<'a> {
     ///     lcm.handle_timeout(Duration::from_millis(1000)).unwrap();
     /// }
     /// ```
-    pub fn handle_timeout(&mut self, timeout: Duration) -> Result<()> {
+    pub fn handle_timeout(&self, timeout: Duration) -> Result<()> {
         let result = unsafe { lcm_handle_timeout(self.lcm, (timeout.as_secs() * 1000) as i32 + (timeout.subsec_nanos() / 1000_000) as i32) };
         match result.cmp(&0) {
             Ordering::Less => Err(Error::new(ErrorKind::Other, "LCM Error")),
@@ -197,7 +198,7 @@ impl<'a> Lcm<'a> {
     /// ```
     /// # use lcm::Lcm;
     /// # let handler_function = |name: String| println!("Hello, {}!", name);
-    /// # let mut lcm = Lcm::new().unwrap();
+    /// # let lcm = Lcm::new().unwrap();
     /// let handler = lcm.subscribe("POSITION", handler_function);
     /// lcm.subscription_set_queue_capacity(handler, 30);
     /// ```
@@ -235,6 +236,7 @@ impl<'a> Drop for Lcm<'a> {
 /// Tests
 ///
 mod test {
+    use std::sync::Arc;
     use super::*;
 
     #[test]
@@ -244,7 +246,7 @@ mod test {
 
     #[test]
     fn test_subscribe() {
-        let mut lcm = Lcm::new().unwrap();
+        let lcm = Lcm::new().unwrap();
         lcm.subscribe("channel", |_: String| {});
         let subs = lcm.subscriptions.lock().unwrap();
         assert_eq!(subs.len(), 1);
@@ -252,7 +254,7 @@ mod test {
 
     #[test]
     fn test_unsubscribe() {
-        let mut lcm = Lcm::new().unwrap();
+        let lcm = Lcm::new().unwrap();
         let sub = lcm.subscribe("channel", |_: String| {});
         lcm.unsubscribe(sub).unwrap();
 
